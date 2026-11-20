@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>墨水屏推图 · Web 版 v0.1</title>
+<link rel="manifest" href="manifest.json">
+<style>
+  body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;margin:0;padding:16px;background:#f4f4f2;color:#222;max-width:640px;margin:0 auto}
+  h1{font-size:19px;margin:4px 0 2px} .sub{color:#666;font-size:13px;margin:0 0 14px}
+  section{background:#fff;border:1px solid #ddd;border-radius:10px;padding:14px;margin-bottom:12px}
+  h2{font-size:15px;margin:0 0 10px} label{display:block;font-size:13px;color:#555;margin:8px 0 4px}
+  input[type=text],input[type=password],textarea,select{width:100%;box-sizing:border-box;padding:9px;border:1px solid #ccc;border-radius:6px;font-size:15px}
+  textarea{min-height:64px;resize:vertical}
+  button{padding:10px 14px;border:0;border-radius:8px;background:#222;color:#fff;font-size:15px;margin:6px 6px 0 0}
+  button.secondary{background:#eee;color:#222} button:disabled{opacity:.45}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  #preview{width:100%;max-width:300px;border:1px solid #ccc;border-radius:6px;display:block;margin-top:10px;background:#fff}
+  #log{white-space:pre-wrap;font:12px/1.6 monospace;background:#111;color:#c8f5c8;border-radius:8px;padding:10px;max-height:220px;overflow:auto;margin-top:10px}
+  .ok{color:#1a7f37;font-weight:700}.bad{color:#c00;font-weight:700}.muted{color:#888;font-size:12px}
+  .thumb{width:72px;height:96px;object-fit:cover;border:1px solid #ccc;border-radius:4px;margin:4px 4px 0 0}
+  .hist-item{display:inline-block;text-align:center;font-size:11px;color:#555;vertical-align:top;width:80px}
+  .hist-item button{padding:2px 8px;font-size:12px;margin:2px 0}
+  details{font-size:13px;color:#555} summary{cursor:pointer}
+</style>
+</head>
+<body>
+<h1>墨水屏推图 · Web 版 <span class="muted">v0.1</span></h1>
+<p class="sub">对应 APK <code>com.epaper.epaper_app 1.0.0</code>：提示词 → 生图 → 裁剪 1200×1600 → 推到板子。网上版随时能生图/裁剪/下载；推图仍需在板子 AP 内完成（见④）。</p>
+
+<section>
+  <h2>① 板子连接</h2>
+  <label>板子地址（AP 内默认）</label>
+  <input type="text" id="boardBase" value="http://192.168.4.1">
+  <div class="row">
+    <button id="btnStatus">查 /status</button>
+    <span id="boardState" class="muted">未检测</span>
+  </div>
+  <div id="statusOut" class="muted"></div>
+</section>
+
+<section>
+  <h2>② 生图或选图</h2>
+  <label>提示词</label>
+  <textarea id="prompt" placeholder="例如：一幅水墨山水，留白，淡雅"></textarea>
+  <div class="row">
+    <button id="btnVoice" class="secondary">🎤 语音输入</button>
+    <span class="muted" id="voiceHint">浏览器语音识别（网页版替代 Paraformer）</span>
+  </div>
+  <label>火山 Ark API Key（只存本机浏览器 localStorage，不发给任何第三方服务器）</label>
+  <input type="password" id="arkKey" placeholder="粘贴 Ark key">
+  <label>生图尺寸（生成后仍会裁剪到 1200×1600）</label>
+  <select id="genSize"><option>1024x1024</option><option>1024x1536</option><option selected>1200x1600</option></select>
+  <div class="row">
+    <button id="btnGen">AI 生图</button>
+    <label for="filePick" class="secondary" style="padding:10px 14px;border-radius:8px;background:#eee;cursor:pointer;margin-top:6px">📷 选本地图片</label>
+    <input type="file" id="filePick" accept="image/*" hidden>
+  </div>
+  <p class="muted">生图直连 Ark 可能被浏览器 CORS 拦截（原生 App 没有这个问题）。若生图失败，改用「选本地图片」：先在别处生好图再传上来裁剪；或用 README 里的局域网后端代理形态。</p>
+</section>
+
+<section>
+  <h2>③ 裁剪预览（1200×1600）</h2>
+  <label class="row"><input type="checkbox" id="grayscale"> 灰度预览（墨水屏效果参考）</label>
+  <canvas id="preview" width="1200" height="1600"></canvas>
+  <div class="row">
+    <button id="btnDownload" class="secondary" disabled>下载裁剪后 JPEG</button>
+    <button id="btnSaveHist" class="secondary" disabled>存入历史（断网后也能推）</button>
+  </div>
+  <p class="muted">流程要点（网上版）：手机流量下生图 → 下载裁剪后 JPEG → 连板子 AP <code>ePaper-13in3</code> → 打开板子自带页面 <code>http://192.168.4.1</code> 选文件上传。若本页由板子同源 serve，历史里的图片可直接推图。</p>
+</section>
+
+<section>
+  <h2>④ 推图到板子</h2>
+  <div class="row">
+    <button id="btnUpload">推图到板子</button>
+    <span class="muted">依次尝试：原始 JPEG → multipart 字段 file → multipart 字段 image</span>
+  </div>
+  <p class="muted">网上版（https）点推图会被浏览器拦截：https 页面不允许访问 http://192.168.4.1。请先用上面「下载裁剪后 JPEG」，再连板子 AP，用板子自带页面上传。本页由板子同源 serve（http://192.168.4.1）时，点推图即可。</p>
+  <div id="log">日志：等待操作…</div>
+</section>
+
+<section>
+  <h2>⑤ 历史</h2>
+  <div id="history"><span class="muted">暂无。生图/选图后点「存入历史」即可离线保存。</span></div>
+</section>
+
+<details>
+  <summary>关于本页与 APK 的对应关系</summary>
+  <p>生图模型：<code>doubao-seedream-5-0-flash-260915</code>，接口 <code>ark.cn-beijing.volces.com/api/v3/images/generations</code>；裁剪目标 1200×1600；推图 <code>POST /upload</code>，状态 <code>GET /status</code>。板子固件源码已证实 /upload 是原始 JPEG body（.ino 注释写明必须用 server.raw() 收字节）；本页仍按「原始 JPEG → multipart file → multipart image」顺序自动尝试作兜底，并在日志里写明哪一种成功。</p>
+</details>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const BOARD_KEY = "epaper.boardBase", ARK_KEY = "epaper.arkKey";
+const MODEL = "doubao-seedream-5-0-flash-260915";
+const ARK_URL = "https://ark.cn-beijing.volces.com/api/v3/images/generations";
+let srcImage = null;      // HTMLImageElement, current source
+let croppedBlob = null;   // JPEG Blob 1200x1600
+
+function log(msg){ const el=$("log"); el.textContent += "\n"+new Date().toLocaleTimeString()+" "+msg; el.scrollTop = el.scrollHeight; }
+function boardBase(){ return $("boardBase").value.replace(/\/+$/,""); }
+$("boardBase").value = localStorage.getItem(BOARD_KEY) || "http://192.168.4.1";
+$("boardBase").addEventListener("change", ()=>localStorage.setItem(BOARD_KEY, boardBase()));
+$("arkKey").value = localStorage.getItem(ARK_KEY) || "";
+$("arkKey").addEventListener("change", ()=>localStorage.setItem(ARK_KEY, $("arkKey").value.trim()));
+
+/* ---------- IndexedDB history ---------- */
+let db = null;
+function openDb(){ return new Promise((res, rej)=>{
+  const req = indexedDB.open("epaper-web", 1);
+  req.onupgradeneeded = ()=>req.result.createObjectStore("images", {keyPath:"id"});
+  req.onsuccess = ()=>{ db = req.result; res(); };
+  req.onerror = ()=>rej(req.error);
+});}
+function dbPut(rec){ return new Promise((res, rej)=>{ const t=db.transaction("images","readwrite"); t.objectStore("images").put(rec); t.oncomplete=res; t.onerror=()=>rej(t.error); }); }
+function dbAll(){ return new Promise((res, rej)=>{ const q=db.transaction("images").objectStore("images").getAll(); q.onsuccess=()=>res(q.result||[]); q.onerror=()=>rej(q.error); }); }
+function dbGet(id){ return new Promise((res, rej)=>{ const q=db.transaction("images").objectStore("images").get(id); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); }); }
+
+async function renderHistory(){
+  try{
+    const items = (await dbAll()).sort((a,b)=>b.createdAt-a.createdAt).slice(0,12);
+    if(!items.length){ $("history").innerHTML = '<span class="muted">暂无。生图/选图后点「存入历史」即可离线保存。</span>'; return; }
+    $("history").innerHTML = "";
+    for(const it of items){
+      const url = URL.createObjectURL(it.blob);
+      const d = document.createElement("div"); d.className="hist-item";
+      d.innerHTML = `<img class="thumb" src="${url}"><br>${new Date(it.createdAt).toLocaleString()}<br><button data-act="load">取出</button> <button data-act="push">直接推</button>`;
+      d.querySelector('[data-act="load"]').onclick = async ()=>{
+        const rec = await dbGet(it.id); loadImageBlob(rec.blob, rec.prompt||"");
+        log("已从历史取出图片，可直接推图");
+      };
+      d.querySelector('[data-act="push"]').onclick = async ()=>{
+        const rec = await dbGet(it.id); await uploadBlob(rec.blob);
+      };
+      $("history").appendChild(d);
+    }
+  }catch(e){ $("history").innerHTML = '<span class="bad">历史读取失败：'+e.message+'</span>'; }
+}
+
+/* ---------- image load + crop ---------- */
+function loadImageBlob(blob, prompt){
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+  img.onload = ()=>{ srcImage = img; $("prompt").value = prompt||$("prompt").value; drawCrop(); URL.revokeObjectURL(url); log("图片已载入，等待裁剪预览"); };
+  img.onerror = ()=>log("图片载入失败");
+  img.src = url;
+}
+function drawCrop(){
+  if(!srcImage) return;
+  const cv = $("preview"), ctx = cv.getContext("2d");
+  const TW=1200, TH=1600, sw=srcImage.naturalWidth, sh=srcImage.naturalHeight;
+  const scale = Math.max(TW/sw, TH/sh);
+  const dw=sw*scale, dh=sh*scale;
+  ctx.fillStyle="#fff"; ctx.fillRect(0,0,TW,TH);
+  ctx.filter = $("grayscale").checked ? "grayscale(1)" : "none";
+  ctx.drawImage(srcImage, (TW-dw)/2, (TH-dh)/2, dw, dh);
+  ctx.filter = "none";
+  cv.toBlob(b=>{ croppedBlob=b; $("btnDownload").disabled=false; $("btnSaveHist").disabled=false; }, "image/jpeg", 0.92);
+}
+$("grayscale").addEventListener("change", drawCrop);
+$("btnDownload").onclick = ()=>{
+  if(!croppedBlob) return;
+  const a=document.createElement("a"); a.href=URL.createObjectURL(croppedBlob);
+  a.download="epaper-1200x1600.jpg"; a.click();
+};
+$("btnSaveHist").onclick = async ()=>{
+  if(!croppedBlob) return;
+  await dbPut({id:Date.now(), prompt:$("prompt").value.trim(), blob:croppedBlob, createdAt:Date.now()});
+  log("已存入历史（IndexedDB），切到板子 AP 后仍可取出推图");
+  renderHistory();
+};
+$("filePick").addEventListener("change", e=>{
+  const f=e.target.files[0]; if(f) loadImageBlob(f, "");
+});
+
+/* ---------- Ark generation ---------- */
+$("btnGen").onclick = async ()=>{
+  const prompt = $("prompt").value.trim();
+  const key = $("arkKey").value.trim();
+  if(!prompt) return log("请先输入提示词");
+  if(!key) return log("请先填写 Ark API Key（只存本机浏览器）");
+  log("正在调用 Ark 生图："+MODEL+" …");
+  try{
+    const r = await fetch(ARK_URL, {method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},
+      body: JSON.stringify({model:MODEL, prompt, size:$("genSize").value, n:1})});
+    const j = await r.json().catch(()=>null);
+    if(!r.ok){ log("Ark 返回 "+r.status+"："+(j&&j.error?JSON.stringify(j.error):"")); return; }
+    const d = j && j.data && j.data[0];
+    if(d && d.url){ const br = await fetch(d.url); loadImageBlob(await br.blob(), prompt); log("生图完成，已载入裁剪"); }
+    else if(d && d.b64_json){ const bin = atob(d.b64_json); const bytes = new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i); loadImageBlob(new Blob([bytes],{type:"image/jpeg"}), prompt); log("生图完成（base64），已载入裁剪"); }
+    else log("Ark 返回无图片数据："+JSON.stringify(j).slice(0,300));
+  }catch(e){
+    log("生图请求失败："+e.message+"。若为 CORS 拦截，说明 Ark 不允许浏览器直连——改用「选本地图片」或局域网后端代理。");
+  }
+};
+
+/* ---------- voice input (web equivalent of Paraformer) ---------- */
+$("btnVoice").onclick = ()=>{
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!SR){ $("voiceHint").textContent = "此浏览器不支持网页语音识别，请手动输入提示词"; return; }
+  const rec = new SR(); rec.lang="zh-CN"; rec.interimResults=false;
+  rec.onresult = e=>{ $("prompt").value = e.results[0][0].transcript; log("语音识别完成"); };
+  rec.onerror = e=>log("语音识别失败："+e.error);
+  rec.start(); log("请说话…");
+};
+
+/* ---------- board: status + upload ---------- */
+$("btnStatus").onclick = async ()=>{
+  log("GET "+boardBase()+"/status …");
+  try{
+    const r = await fetch(boardBase()+"/status");
+    const t = await r.text();
+    $("boardState").innerHTML = r.ok ? '<span class="ok">板子在线 ✓</span>' : '<span class="bad">HTTP '+r.status+'</span>';
+    $("statusOut").textContent = "响应："+t.slice(0,500);
+    log("/status → HTTP "+r.status);
+  }catch(e){ $("boardState").innerHTML='<span class="bad">连不上板子</span>'; $("statusOut").textContent=""; log("/status 失败："+e.message+"（确认已连 AP ePaper-13in3，且本页与板子同源或在同一局域网）"); }
+};
+
+async function uploadBlob(blob){
+  if(!blob) return log("没有可推的图片：请先生图或选图");
+  const url = boardBase()+"/upload";
+  const attempts = [
+    ["原始 JPEG body", ()=>fetch(url,{method:"POST", headers:{"Content-Type":"image/jpeg"}, body:blob})],
+    ["multipart 字段 file", ()=>{ const f=new FormData(); f.append("file", blob, "image.jpg"); return fetch(url,{method:"POST", body:f}); }],
+    ["multipart 字段 image", ()=>{ const f=new FormData(); f.append("image", blob, "image.jpg"); return fetch(url,{method:"POST", body:f}); }],
+  ];
+  for(const [name, fn] of attempts){
+    log("尝试推图："+name+" …");
+    try{
+      const r = await fn();
+      const t = (await r.text()).slice(0,300);
+      log("  → HTTP "+r.status+" "+t);
+      if(r.ok){ log("✅ 推图成功（"+name+"）。请把这个形态告诉我，我把它固定为默认。"); return true; }
+    }catch(e){ log("  → 请求失败："+e.message); }
+  }
+  log("❌ 三种形态都失败。可能原因：板子 /upload 需要别的字段名/路径，或浏览器跨域拦截（本页须由板子同源 serve）。把日志发给我，我再查。");
+  return false;
+}
+$("btnUpload").onclick = ()=>{
+  if(location.protocol === "https:" && boardBase().startsWith("http://")){
+    log("⚠ 本页是网上版（https），浏览器禁止 https 页面访问 http://192.168.4.1，推图会被拦截。请先点「下载裁剪后 JPEG」，再连板子 AP，用板子自带页面 http://192.168.4.1 上传。");
+    return;
+  }
+  uploadBlob(croppedBlob);
+};
+
+/* ---------- PWA ---------- */
+if("serviceWorker" in navigator && location.protocol.startsWith("http")){
+  navigator.serviceWorker.register("sw.js").then(()=>log("Service Worker 已注册：本页可离线缓存")).catch(e=>log("SW 注册失败（不影响推图）："+e.message));
+}
+openDb().then(renderHistory).catch(e=>log("IndexedDB 打开失败，历史不可用："+e.message));
+</script>
+</body>
+</html>
