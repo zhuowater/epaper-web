@@ -3,6 +3,14 @@
 对应 APK `com.epaper.epaper_app 1.0.0`（Flutter，label 占位名 BlaBla）的网页版。
 REA 分析见 `~/workspace/rea-analysis/apk-20261120/ANALYSIS.md`。
 
+## 网上版（2026-11-20 已上线）
+
+- **地址：https://zhuowater.github.io/epaper-web/**
+- 托管：GitHub Pages，公开仓库 https://github.com/zhuowater/epaper-web （main 分支，index.html / sw.js / manifest.json / README.md 四个文件；本目录是源码，改完要重新 push 才会上线）。
+- Vercel 曾尝试但失败：MCP 的 upload_file 报 403，连接无 `zhuowaters-projects` team 权限，且授权工具不在可用列表里——改走 GitHub Pages。
+- **网上版能做什么**：任何地方打开，生图（Ark）、裁剪 1200×1600、灰度预览、下载 JPEG、历史（本源 IndexedDB）。
+- **网上版不能直接推图**：https 页面访问 http://192.168.4.1 会被浏览器以混合内容拦截，页面上的推图按钮会直接提示并拒绝。流程是：网上版生图 → 下载 JPEG → 连板子 AP `ePaper-13in3` → 打开板子自带页面 `http://192.168.4.1` 选文件上传。直接推图仍需本页由板子同源 serve（或把这三个文件放进板子固件静态托管）。
+
 ## 文件（共 3 个，无构建步骤，板子直接 serve 即可）
 
 - `index.html` — 全部功能（单文件，内联 CSS+JS）
